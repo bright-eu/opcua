@@ -676,7 +676,9 @@ func (s *SecureChannel) handleOpenSecureChannelResponse(resp *ua.OpenSecureChann
 	instance.state = channelActive
 	instance.secureChannelID = resp.SecurityToken.ChannelID
 	instance.securityTokenID = resp.SecurityToken.TokenID
-	instance.createdAt = resp.SecurityToken.CreatedAt
+	// CreatedAt is on the server's clock. Expiry is timed on ours, so a server
+	// whose clock lags would have its token expire on arrival.
+	instance.createdAt = time.Now()
 	instance.revisedLifetime = time.Millisecond * time.Duration(resp.SecurityToken.RevisedLifetime)
 
 	// allow the client to specify a lifetime that is smaller
@@ -700,7 +702,7 @@ func (s *SecureChannel) handleOpenSecureChannelResponse(resp *ua.OpenSecureChann
 
 	s.activeInstance = instance
 
-	debug.Printf("uasc %d: received security token. channelID=%d tokenID=%d createdAt=%s lifetime=%s", s.c.ID(), instance.secureChannelID, instance.securityTokenID, instance.createdAt.Format(time.RFC3339), instance.revisedLifetime)
+	debug.Printf("uasc %d: received security token. channelID=%d tokenID=%d createdAt=%s lifetime=%s", s.c.ID(), instance.secureChannelID, instance.securityTokenID, resp.SecurityToken.CreatedAt.Format(time.RFC3339), instance.revisedLifetime)
 
 	// depending on whether the channel is used in a client
 	// or a server we need to trigger different behavior.

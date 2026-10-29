@@ -890,3 +890,45 @@ func newTestTCPConnPair(t *testing.T) (*net.TCPConn, *net.TCPConn) {
 
 	return nil, nil
 }
+
+func TestTokenExpiryIgnoresServerClock(t *testing.T) {
+	serverTCP, clientTCP := newTestTCPConnPair(t)
+	defer serverTCP.Close()
+	defer clientTCP.Close()
+
+	uacpConn, err := uacp.NewConn(serverTCP, &uacp.Acknowledge{
+		ReceiveBufSize: 64 * 1024,
+		SendBufSize:    64 * 1024,
+	})
+	require.NoError(t, err)
+
+	s := &SecureChannel{
+		c: uacpConn,
+		cfg: &Config{
+			SecurityPolicyURI: ua.SecurityPolicyURINone,
+			SecurityMode:      ua.MessageSecurityModeNone,
+			Lifetime:          uint32(time.Hour / time.Millisecond),
+		},
+		kind:      server,
+		closing:   make(chan struct{}),
+		instances: make(map[uint32][]*channelInstance),
+	}
+	defer close(s.closing)
+	s.openingInstance = newChannelInstance(s)
+
+	// A server whose clock lags ours by a month issues a token that, read
+	// against our clock, expired long ago.
+	resp := &ua.OpenSecureChannelResponse{
+		SecurityToken: &ua.ChannelSecurityToken{
+			ChannelID:       7,
+			TokenID:         7,
+			CreatedAt:       time.Now().Add(-30 * 24 * time.Hour),
+			RevisedLifetime: uint32(10 * time.Minute / time.Millisecond),
+		},
+	}
+	require.NoError(t, s.handleOpenSecureChannelResponse(resp, nil, s.openingInstance))
+
+	require.Never(t, func() bool {
+		return len(s.getInstancesBySecureChannelID(7)) == 0
+	}, 200*time.Millisecond, 10*time.Millisecond, "token expired on arrival")
+}
